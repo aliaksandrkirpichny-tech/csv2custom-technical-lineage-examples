@@ -91,8 +91,16 @@ def generate_source_code(
     :returns: SourceCode object constructed using the provided input
     :rtype: SourceCode
     """
-    # in case of a file
-    if Path(source_code_text).is_file():
+    # in case of a file — guard against OSError when source_code_text is a long
+    # string (e.g. inline SQL) that exceeds the OS filename length limit (255 chars
+    # on Linux). Path.is_file() calls os.stat() internally, which raises
+    # OSError: [Errno 36] File name too long in that situation.
+    try:
+        is_file = Path(source_code_text).is_file()
+    except OSError:
+        is_file = False
+
+    if is_file:
         file_name = Path(source_code_text).name
         shutil.copy(source_code_text, custom_lineage_config.source_code_directory_path / file_name)
     else:

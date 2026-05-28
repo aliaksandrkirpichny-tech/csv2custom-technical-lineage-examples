@@ -48,7 +48,7 @@ System,Database,Schema,Table,Column,fullname,domain_id,System,Database,Schema,Ta
  * A value for the leaf asset type is optional.
  * Values for `fullname` and `domain_id` are optional.
  * Values for `source_code`, `highlights`, and `transformation_display_name` are optional.
- * `source_code` can either be a string or the full path to a file.
+ * `source_code` can either be a string or the full path to a file. **Note:** the detection of whether the value is a file path or inline text is done automatically. If the value exceeds 255 characters in any single path component, it will always be treated as inline text, regardless of whether it looks like a file path. Therefore, file paths with individual components exceeding 255 characters are not supported.
 
 Headers define the asset types for which you define the lineage relationships; therefore, one file can only contain lineage relationships for the same type of assets in the source/target. You can, however, create as many CSV files as you want in the directory. The generated `metadata.json` file will contain the definition for `System`, `Database`, `Schema`, `Table`, and `Column`. If you are using any other asset types, you need to add these in the `metadata.json` file, with their respective `uuid`.
  

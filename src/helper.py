@@ -12,7 +12,6 @@ from requests.auth import HTTPBasicAuth
 from urllib3.connection import NameResolutionError
 
 from src.exceptions import CollibraAPIError, InvalidUUIDException, MissingInputExpection
-
 from .models import (
     Asset,
     AssetFullnameDomain,
@@ -28,7 +27,9 @@ from .models import (
 )
 
 __all__ = ["generate_json_files", "generate_source_code"]
+
 MAX_HTTP_RETRY = 5
+
 AssetTypeSequence: TypeAlias = Sequence[Union[NodeAsset, ParentAsset, LeafAsset]]
 
 
@@ -74,9 +75,10 @@ def generate_json_files(
 def generate_source_code(
     source_code_text: str,
     custom_lineage_config: CustomLineageConfig,
+    source_code_type: Optional[str] = None,
     highlights: Optional[List[SourceCodeHighLight]] = None,
     transformation_display_name: Optional[str] = None,
-) -> SourceCode:
+) -> Optional[SourceCode]:
     """
     Helper function that generates `SourceCode` object.
 
@@ -84,30 +86,54 @@ def generate_source_code(
     :type source_code_text: str
     :param custom_lineage_config: Configuration object
     :type custom_lineage_config: CustomLineageConfig
+    :param source_code_type: Explicitly declare whether source_code_text is a file path or inline text.
+        Accepted values: 'file', 'query', or None (auto-detect).
+        When None or empty, the function attempts to auto-detect by checking if the value is an existing file.
+        Note: auto-detection has a known limitation — if the value exceeds 255 characters in any single
+        path component, it will always be treated as inline text regardless of whether it looks like a file path.
+        To avoid ambiguity, it is recommended to explicitly set source_code_type when possible.
+    :type source_code_type: str, optional
     :param highlights: List of SourceCodeHighLight objects
     :type highlights: List[SourceCodeHighLight], optional
     :param transformation_display_name: Text to use as transformation name
     :type transformation_display_name: str
-    :returns: SourceCode object constructed using the provided input
+    :returns: SourceCode object constructed using the provided input, or None if source_code_text is empty
     :rtype: SourceCode
     """
-    # in case of a file — guard against OSError when source_code_text is a long
-    # string (e.g. inline SQL) that exceeds the OS filename length limit (255 chars
-    # on Linux). Path.is_file() calls os.stat() internally, which raises
-    # OSError: [Errno 36] File name too long in that situation.
-    try:
-        is_file = Path(source_code_text).is_file()
-    except OSError:
-        is_file = False
+    # handle empty source_code_text
+    if not source_code_text or not source_code_text.strip():
+        return None
 
-    if is_file:
+    if source_code_type == "file":
+        # explicit file path — no guessing needed
         file_name = Path(source_code_text).name
         shutil.copy(source_code_text, custom_lineage_config.source_code_directory_path / file_name)
-    else:
-        # generate file name
+
+    elif source_code_type == "query":
+        # explicit inline text — no guessing needed
         file_name = f"{str(uuid.uuid4())}.txt"
         with open(custom_lineage_config.source_code_directory_path / file_name, "w") as out_file:
             out_file.write(source_code_text)
+
+    else:
+        # no source_code_type provided — fall back to auto-detection
+        # guard against OSError when source_code_text is a long string (e.g. inline SQL)
+        # that exceeds the OS filename length limit (255 chars on Linux).
+        # Path.is_file() calls os.stat() internally, which raises
+        # OSError: [Errno 36] File name too long in that situation.
+        try:
+            is_file = Path(source_code_text).is_file()
+        except OSError:
+            is_file = False
+
+        if is_file:
+            file_name = Path(source_code_text).name
+            shutil.copy(source_code_text, custom_lineage_config.source_code_directory_path / file_name)
+        else:
+            file_name = f"{str(uuid.uuid4())}.txt"
+            with open(custom_lineage_config.source_code_directory_path / file_name, "w") as out_file:
+                out_file.write(source_code_text)
+
     return SourceCode(
         path=f"{custom_lineage_config.source_code_directory_name}/{file_name}",
         highlights=highlights,
@@ -135,7 +161,6 @@ def _http_get(url: str, auth: HTTPBasicAuth) -> requests.Response:
             else:
                 logging.warning(f"attempt {attempt}/5 GET {url} failed with {ret.status_code} {ret.text}")
                 attempt += 1
-
     raise CollibraAPIError(f"Failed GET {url} after {MAX_HTTP_RETRY} attempts")
 
 
@@ -156,7 +181,6 @@ def collect_assets_typeid(
     :returns: list of AssetFullnameDomain objects
     :rtype: list
     """
-
     asset_types = []
     limit = 100
     offset = 0
@@ -173,7 +197,6 @@ def collect_assets_typeid(
             name = entry.get("name")
             id = entry.get("id")
             asset_types.append(AssetType(name=name, uuid=id))
-
     return asset_types
 
 
@@ -203,21 +226,18 @@ def collect_assets_fullname(
     :returns: list of AssetFullnameDomain objects
     :rtype: list
     """
-
     def get_assets_fullname_from_collibra() -> List[AssetFullnameDomain]:
         fullnames = []
         auth = HTTPBasicAuth(username=username, password=password)
         cursor = urllib.parse.quote("")
         limit = 1000
         base_path = f"https://{collibra_instance}.collibra.com/rest/2.0/assets?limit={limit}"
-
         if domain_id:
             base_path = base_path + f"&domainId={domain_id}"
         if type_id:
             base_path = base_path + f"&typeIds={type_id}"
         if name:
             base_path = base_path + f"&name={urllib.parse.quote(name)}"
-
         while cursor is not None:
             query_path = base_path + f"&cursor={cursor}"
             ret = _http_get(url=query_path, auth=auth)
@@ -236,19 +256,16 @@ def collect_assets_fullname(
                         uuid=uuid,
                     )
                 )
-
         return fullnames
 
     def validate_inputs() -> None:
         if not domain_id and not type_id and not name:
             raise MissingInputExpection("At least one of the parameters must be provided: typeId, domainId or name")
-
         if type_id:
             try:
                 uuid.UUID(type_id)
             except ValueError:
                 raise InvalidUUIDException(f"Type Id {type_id} is not a valid UUID")
-
         if domain_id:
             try:
                 uuid.UUID(domain_id)
@@ -263,12 +280,12 @@ def get_asset_types_name_from_lineage_json_file(path: str) -> set:
     types = set()
     with open(path) as f:
         lineages = json.load(f)
-        for lineage in lineages:
-            for src_trg in ["src", "trg"]:
-                types.add(lineage[src_trg].get("leaf", {}).get("type"))
-                types.add(lineage[src_trg].get("parent", {}).get("type"))
-                for node in lineage[src_trg].get("nodes", []):
-                    types.add(node.get("type"))
+    for lineage in lineages:
+        for src_trg in ["src", "trg"]:
+            types.add(lineage[src_trg].get("leaf", {}).get("type"))
+            types.add(lineage[src_trg].get("parent", {}).get("type"))
+            for node in lineage[src_trg].get("nodes", []):
+                types.add(node.get("type"))
     if None in types:
         types.remove(None)
     return types

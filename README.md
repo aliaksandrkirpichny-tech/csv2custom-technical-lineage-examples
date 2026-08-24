@@ -48,11 +48,17 @@ System,Database,Schema,Table,Column,fullname,domain_id,System,Database,Schema,Ta
  * A value for the leaf asset type is optional.
  * Values for `fullname` and `domain_id` are optional.
  * Values for `source_code`, `highlights`, and `transformation_display_name` are optional.
- * `source_code` can either be a string or the full path to a file. **Note:** the detection of whether the value is a file path or inline text is done automatically. If the value exceeds 255 characters in any single path component, it will always be treated as inline text, regardless of whether it looks like a file path. Therefore, file paths with individual components exceeding 255 characters are not supported.
+ * `source_code` can either be a string or the full path to a file.
+ * `source_code_type` is an optional column that explicitly declares whether the `source_code` value is a file path or inline text. Accepted values are `file` or `query`. When not provided, the type is auto-detected by checking if the value is an existing file on disk. **It is recommended to set `source_code_type` explicitly** to avoid ambiguity, especially when `source_code` contains long SQL strings. The following rules apply:
+   * If `source_code_type` is `file`, the value is always treated as a file path and the file is copied to the output folder.
+   * If `source_code_type` is `query`, the value is always treated as inline text and written to a new file in the output folder.
+   * If `source_code_type` is omitted or empty, auto-detection is used. **Note:** if the `source_code` value exceeds 255 characters in any single path component, it will always be treated as inline text regardless of whether it looks like a file path. Therefore, when using auto-detection, file paths with individual components exceeding 255 characters are not supported.
+   * If `source_code` is empty and `source_code_type` is `file`, a warning is logged and the row is skipped.
+   * If an unrecognized value is provided for `source_code_type`, a warning is logged and auto-detection is used as fallback.
 
 Headers define the asset types for which you define the lineage relationships; therefore, one file can only contain lineage relationships for the same type of assets in the source/target. You can, however, create as many CSV files as you want in the directory. The generated `metadata.json` file will contain the definition for `System`, `Database`, `Schema`, `Table`, and `Column`. If you are using any other asset types, you need to add these in the `metadata.json` file, with their respective `uuid`.
  
-Let's have a look at two examples:
+Let's have a look at three examples:
 
 ### CSV Example 1
 
@@ -72,6 +78,16 @@ gcs,catingestiontest,/,ingestion-test,mytest.csv,f13bf705-13a4-44c9-843e-f341fec
  ```
 
 This example creates a lineage relationship between a file and a column. The custom `fullname` and `domain_id` are provided for the file because they are needed to obtain stitching.
+
+### CSV Example 3 (with explicit source_code_type)
+
+ ```
+ System,Database,Schema,Table,Column,fullname,domain_id,System,Database,Schema,Table,Column,fullname,domain_id,source_code,highlights,transformation_display_name,source_code_type
+snowflake,KRISTOF,PUBLIC,T1,USERID,,,snowflake,KRISTOF,PUBLIC,V2,UI_2L,,,CREATE VIEW KRISTOF.PUBLIC.V2 AS select USERID from KRISTOF.PUBLIC.T1,"[0:70]",transformation,query
+snowflake,KRISTOF,PUBLIC,T1,USERID,,,snowflake,KRISTOF,PUBLIC,V2,UI_2L,,,/path/to/my_transformation.sql,"[0:70]",transformation,file
+ ```
+
+The first row uses `source_code_type=query` to explicitly declare the `source_code` value as inline SQL. The second row uses `source_code_type=file` to declare it as a path to an existing file. Using explicit `source_code_type` is recommended when `source_code` contains long SQL strings to avoid auto-detection limitations.
 
 ## Python batch definition custom technical lineage examples
 
